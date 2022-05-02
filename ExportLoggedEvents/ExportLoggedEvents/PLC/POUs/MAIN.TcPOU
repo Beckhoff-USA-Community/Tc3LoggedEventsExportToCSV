@@ -1,0 +1,182 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.11">
+  <POU Name="MAIN" Id="{27a70b53-295d-4773-8f98-bee7b274d019}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR
+	xInit					:BOOL:=TRUE;
+	fbAlarm					:FB_TcAlarm;
+	fbMsg					:FB_TcMessage;	
+
+	xCreateLogEntries		:BOOL;                			
+	tonPulse				:TON;            	    	
+	iCnt					:INT;
+	
+	fbDeviceInfo			:FB_GetDeviceIdentificationEx;
+	
+	sExportPath				:STRING(255);
+	sFullPathName			:STRING(255);
+
+	xExportLog				:BOOL;
+	FilterExample			:(NONE,OnlyMsg,OnlyAlarm,Complex):=OnlyAlarm;	                   	
+	ExportStep				:(IDEL,SetFilters,Export);
+	
+	
+	fbTcEventLogger			:FB_TcEventLogger;
+	fbCsvExportSetting		:FB_TcEventCsvExportSettings;
+	fbExportFilter			:FB_TcEventFilter;
+	hrDebug					:HRESULT;
+	
+	TimeSource				:(SystemTime,LocalSystemTime);
+	fbGetTime				:FB_LocalSystemTime;
+	dtNow					:DT;
+	sNow					:STRING;
+
+	dtFilterTimeGT			:DT;
+
+	
+	xExportError			:BOOL;
+	hrExportErrorCode		:HRESULT;
+	
+	iExportBusyCnt			:UDINT;
+	
+	
+	xClearLoggedEvents		:BOOL;
+	xClearLoggedEventsError :BOOL;
+	hrClearLoggedEventsErrorCode :HRESULT;
+	iBusyClearing			:BOOL;
+END_VAR
+VAR CONSTANT
+	sDT						:STRING(3):='DT#';
+	sColon					:STRING(1):=':';
+	sUnderScope				:STRING(1):='_';
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[//Init
+	IF xInit THEN
+		xInit:=FALSE;
+		fbAlarm.CreateEx(TC_EVENTS.MyEvents.Alarm,FALSE,0);
+		fbMsg.CreateEx(TC_EVENTS.MyEvents.Msg,0);
+		fbDeviceInfo(bExecute:=TRUE);
+	END_IF
+	
+	fbDeviceInfo();
+	
+	IF NOT fbDeviceInfo.bError THEN
+		fbDeviceInfo.bExecute:=FALSE;
+	END_IF
+
+//Generate some events
+	tonPulse(IN:=NOT tonPulse.Q AND xCreateLogEntries, PT:=T#200MS);
+	IF tonPulse.Q THEN
+		iCnt:=iCnt+1;
+		IF fbAlarm.bRaised THEN
+			fbAlarm.Clear(0,TRUE);
+		END_IF
+		
+		fbAlarm.ipArguments.Clear().AddInt(iCnt);
+		fbAlarm.Raise(0);
+		
+		
+		fbMsg.ipArguments.Clear().AddInt(iCnt);
+		fbMsg.Send(0);
+	END_IF
+	
+	//Create 10 events
+	IF iCnt>=10 THEN
+		xCreateLogEntries	:=FALSE;
+		iCnt				:=0;
+	END_IF
+
+
+//Get the current system time - used for filter settings in the export bellow.
+//Default Time source of TwinCAT logged events is the same as system time.
+	dtNow	:= FILETIME64_TO_DT(F_GetSystemTime());	
+	sNow	:= DT_TO_STRING(dtNow);
+	FindAndDelete(pSrcString:= ADR(sNow),ADR(sDT),ADR(sNow),SIZEOF(sNow));
+	FindAndReplace(pSrcString:= ADR(sNow),pDeleteString:=ADR(sColon),pInsertString:=ADR(sUnderScope),pDstString:=ADR(sNow),nDstSize:=SIZEOF(sNow));
+	
+
+//Export events to CSV
+	CASE ExportStep OF
+		
+		IDEL:
+			IF xExportLog THEN
+				xExportLog 		:=FALSE;	
+				ExportStep		:=SetFilters;		
+			END_IF	
+		
+		SetFilters:	
+		
+			//Path on disk to new exported file
+			IF fbDeviceInfo.stDevIdent.strImageOsName = 'Windows CE' THEN
+				sExportPath:='\Hard Disk\TwinCAT\3.1\Boot\';
+			ELSIF FIND(fbDeviceInfo.stDevIdent.strImageOsName,'Windows 10')>0 THEN
+				sExportPath:='c:\TwinCAT\3.1\Boot\';
+			ELSIF fbDeviceInfo.stDevIdent.strImageOsName='TC/BSD' THEN
+				sExportPath:='/usr/local/etc/TwinCAT/3.1/Boot/';
+			END_IF
+			
+	
+			//Append date time to file name
+			sFullPathName	:=CONCAT(sExportPath,CONCAT(CONCAT('LogExport',sNow),'.csv'));		
+	
+		
+			//Setup colums in the CSV file				
+			fbCsvExportSetting.Clear();
+			fbCsvExportSetting.sDelimiter:=',';
+			fbCsvExportSetting.AddField(eType:=TcEventField.EventText,'Event Text','',);
+			fbCsvExportSetting.AddField(eType:=TcEventField.TimeRaised,'Time Raised','',);
+			fbCsvExportSetting.AddField(eType:=TcEventField.TimeConfirmed,'Time Confirmed','',);
+			fbCsvExportSetting.AddField(eType:=TcEventField.TimeCleared,'Time Cleared','',);
+			fbCsvExportSetting.AddField(eType:=TcEventField.SeverityLevel,'Severity','',);	
+			fbCsvExportSetting.AddField(eType:=TcEventField.SourceName,'Source','',);		
+			fbCsvExportSetting.AddFilter(fbExportFilter); 
+		
+			//Filter only alarms or messages as example, or events only that occured after x point in time.
+			CASE FilterExample OF
+				NONE:
+					fbExportFilter.Clear();
+				OnlyMsg:
+					fbExportFilter.Clear().IsMessage();
+				OnlyAlarm:
+					fbExportFilter.Clear().IsAlarm();		
+				Complex:
+					//Look at the fbAlarm.TimeRaised property for a compairison 
+					fbExportFilter.Clear().IsAlarm().AND_OP().TimeRaised.GreaterThan(DT_TO_FILETIME64(dtFilterTimeGT));
+					
+			END_CASE
+	
+			
+			iExportBusyCnt	:=0;
+			ExportStep		:=Export;
+		Export:
+		
+			IF fbTcEventLogger.ExportLoggedEvents(	sFileName		 :=sFullPathName ,
+			 										ipExportSettings :=fbCsvExportSetting , 
+													bError			 =>xExportError , 
+													hrErrorCode		 =>hrExportErrorCode ) 
+			THEN
+				ExportStep:=IDEL;
+			ELSE
+				//Debug - just to see how long it takes for async export to complete
+				iExportBusyCnt:=iExportBusyCnt+1;
+			END_IF
+			
+	
+	END_CASE
+
+
+//Clear logged events
+	IF xClearLoggedEvents THEN
+		fbTcEventLogger.ClearAllAlarms(0,TRUE);
+		IF fbTcEventLogger.ClearLoggedEvents(ipClearSettings:=0 , bError=>xClearLoggedEventsError , hrErrorCode=>hrClearLoggedEventsErrorCode )THEN
+			xClearLoggedEvents	:=FALSE;
+			iBusyClearing		:=FALSE;
+		ELSE
+			iBusyClearing		:=TRUE;
+		END_IF
+	END_IF
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

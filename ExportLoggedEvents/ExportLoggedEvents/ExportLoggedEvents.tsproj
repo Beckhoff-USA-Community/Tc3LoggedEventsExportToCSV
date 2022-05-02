@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<TcSmProject xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.beckhoff.com/schemas/2012/07/TcSmProject" TcSmVersion="1.0" TcVersion="3.1.4024.29">
+	<DataTypes>
+		<DataType>
+			<Name GUID="{41D4F99A-74AA-4023-B2F3-0411D1ADF317}" PersistentType="true">MyEvents</Name>
+			<DisplayName TxtId=""><![CDATA[My Events]]></DisplayName>
+			<EventId>
+				<Name Id="1">Alarm</Name>
+				<DisplayName TxtId=""><![CDATA[This is Alarm call number {0}]]></DisplayName>
+				<Severity>Critical</Severity>
+			</EventId>
+			<EventId>
+				<Name Id="2">Msg</Name>
+				<DisplayName TxtId=""><![CDATA[This is message call number {0}]]></DisplayName>
+				<Severity>Warning</Severity>
+			</EventId>
+			<Hides>
+				<Hide GUID="{6D0D2BF2-1514-4B9A-9E7A-58F053D7A483}"/>
+				<Hide GUID="{2AFAD986-2A48-467C-8762-FD4AA7EA434B}"/>
+				<Hide GUID="{ACDBA50C-BD6C-451A-BE34-0D7BAA9DC8AF}"/>
+				<Hide GUID="{E941584D-0372-4938-8707-A017C08C8F98}"/>
+			</Hides>
+		</DataType>
+	</DataTypes>
+	<Project ProjectGUID="{B213B82A-A6A5-407F-B1BD-1C4E6CF783B1}" TargetNetId="5.34.12.211.1.1" ShowHideConfigurations="#x3c7">
+		<System>
+			<Tasks>
+				<Task Id="3" Priority="20" CycleTime="100000" AmsPort="350" AdtTasks="true">
+					<Name>PlcTask</Name>
+				</Task>
+			</Tasks>
+		</System>
+		<Plc>
+			<Project File="PLC.xti"/>
+		</Plc>
+	</Project>
+</TcSmProject>
